@@ -2,14 +2,305 @@
 
 The following workflows present a high-level overview of common Boot Orchestration Service \(BOS\) operations. These workflows depict how services interact with each other when booting, configuring, or shutting down nodes. They also help provide a quicker and deeper understanding of how the system functions.
 
+## BOS V2 Workflows
+
 The following workflows are included in this section:
 
-  - [Boot and Configure Nodes](#boot-and-configure)
-  - [Reconfigure Nodes](#reconfigure)
-  - [Power Off Nodes](#power-off)
+  - [Boot Nodes](#v2-boot-nodes)
+  - [Reboot Nodes](#v2-reboot-nodes)
+  - [Power Off Nodes](#v2-power-off-nodes)
 
-### Boot and Configure Nodes
 
+### V2 Boot Nodes
+**Use Case:** Administrator powers on and configures select compute nodes.
+
+**Components:** This workflow is based on the interaction of the BOS with other services during the boot process:
+
+Mentioned in this workflow:
+
+-   Boot Orchestration Service \(BOS\) is responsible for booting, configuring, and shutting down collections of nodes. The Boot Orchestration Service has the following components:
+    -   Boot Orchestration Session Template is a collection of one or more boot set objects. A boot set defines a collection of nodes and the information about the boot artifacts and parameters.
+    -   BOS sessions provide a way to apply a template across a group of nodes and monitor the progress of those nodes as they move toward their desired state.
+    -   BOS Operators interact with other services to perform actions on nodes, moving them toward their desired state.
+-   Cray Advanced Platform and Monitoring Control \(CAPMC\) service provides system-level power control for nodes in the system. CAPMC interfaces directly with the Redfish APIs to the controller infrastructure to effect power and environmental changes on the system.
+-   Hardware State Manager \(HSM\) tracks the state of each node and their group and role associations.
+-   Boot Script Service \(BSS\) stores per-node information about iPXE boot script. Nodes consult BSS for boot artifacts \(kernel, initrd, image root\) and boot parameters when nodes boot or reboot.
+-   The Simple Storage Service \(Ceph S3\) is an artifact repository that stores boot artifacts.
+-   Configuration Framework Service \(CFS\) configures nodes using configuration framework. Launches and aggregates the status from one or more Ansible instances against nodes \(node personalization\) or images \(image customization\).
+
+![Boot Nodes](../../img/operations/bos_v2_boot.gif)
+
+**Workflow Overview:** The following sequence of steps occur during this workflow.
+
+1.  **Administrator creates a configuration**
+
+    Add a configuration to CFS.
+
+    ```bash
+    cray cfs configurations update sample-config --file configuration.json
+    ```
+
+    Example output:
+
+    ```json
+    {
+        "lastUpdated": "2020-09-22T19:56:32Z",
+        "layers": [
+            {
+                "cloneUrl": "https://api-gw-service-nmn.local/vcs/cray/configmanagement.
+                git",
+                "commit": "01b8083dd89c394675f3a6955914f344b90581e2",
+                "playbook": "site.yaml"
+            }
+        ],
+        "name": "sample-config"
+    }
+    ```
+
+1.  **Administrator creates a session template**
+
+    A session template is a collection of metadata for a group of nodes and their desired configuration. A session template can be created from a JSON structure. It returns a SessionTemplate ID if successful.
+
+    See [Manage a Session Template](Manage_a_Session_Template.md) for more information.
+
+1.  **Administrator creates a session**
+
+    Create a session to perform the operation specified in the operation request parameter on the boot set defined in the session template. For this use case, Administrator creates a session with operation as Boot and specifies the session template ID.
+
+    ```bash
+    # cray bos v2 sessions create \
+    --template-name SESSIONTEMPLATE_NAME \
+    --operation Boot
+    ```
+
+1.  **Session setup operator**
+
+    The creation of a session causes the session-setup operator to set a desired state on all relevant components.  This includes pulling files from S3 to determine boot artifacts like kernel, initrd, and root file system.  The session setup operator also enables the relevant components at this time.
+    
+1.  **Phase operator (powering-on)**
+
+    The phase operator will detect the enabled components and assign them a phase.  This involves checking the current state of the node, including communicating with HSM to determine the current power status of the node.
+    
+    In this example of booting nodes, the first phase is `powering-on`.  If queried at this point, the nodes will have a status of `power-on-pending`.
+    
+1.  **Power-on operator**
+
+    The power-on operator will detect nodes with a `power-on-pending` status.  The power-on operator first sets the desired boot artifacts in BSS.  If configuration is enabled for the node, the power-on operator will also call CFS to set the desired configuration and disable the node.  The power-on operator then calls capmc to power-on the node.  Lastly, the power-on operator will update the state of the node in BOS, including setting the last action.  If queried at this point, the nodes will have a status of `power-on-called`.
+    
+1.  **CAPMC boots nodes**
+
+    CAPMC interfaces directly with the Redfish APIs and powers on the selected nodes.
+
+1. **BSS interacts with the nodes**
+
+    BSS generates iPXE boot scripts based on the image content and boot parameters that have been assigned to a node. Nodes download the iPXE boot script from BSS.
+
+1. **S3 interacts with the nodes**
+
+    Nodes download the boot artifacts. The nodes boot using the boot artifacts pulled from S3.
+    
+1.  **Phase operator (configuring)**
+
+    The phase operator will continue monitoring the states for each node until HSM reports that the power states are on.  When the power state for a node is on, the phase operator will either set the phase to `configuring` if CFS configuration is required or it will clear the current phase if the node is in it's final state.
+    
+1. **CFS applies configuration**
+
+    If needed, CFS runs Ansible on the nodes and applies post-boot configuration \(also called node personalization\).
+    
+1.  **Phase operator (complete)**
+
+    The phase operator will continue monitoring the states for each node until CFS reports that configuration is complete.  The phase operator will clear the current phase now that the node is in it's final state.  The phase operator will also disable components at this point.
+    
+1.  **Session completion operator**
+
+    When all nodes belonging to a session have been disabled, the session is marked complete, and it's final status is saved to the database.
+    
+### V2 Reboot Nodes
+**Use Case:** Administrator reboots and configures select compute nodes.
+
+**Components:** This workflow is based on the interaction of the BOS with other services during the boot process:
+
+Mentioned in this workflow:
+
+-   Boot Orchestration Service \(BOS\) is responsible for booting, configuring, and shutting down collections of nodes. The Boot Orchestration Service has the following components:
+    -   Boot Orchestration Session Template is a collection of one or more boot set objects. A boot set defines a collection of nodes and the information about the boot artifacts and parameters.
+    -   BOS sessions provide a way to apply a template across a group of nodes and monitor the progress of those nodes as they move toward their desired state.
+    -   BOS Operators interact with other services to perform actions on nodes, moving them toward their desired state.
+-   Cray Advanced Platform and Monitoring Control \(CAPMC\) service provides system-level power control for nodes in the system. CAPMC interfaces directly with the Redfish APIs to the controller infrastructure to effect power and environmental changes on the system.
+-   Hardware State Manager \(HSM\) tracks the state of each node and their group and role associations.
+-   Boot Script Service \(BSS\) stores per-node information about iPXE boot script. Nodes consult BSS for boot artifacts \(kernel, initrd, image root\) and boot parameters when nodes boot or reboot.
+-   The Simple Storage Service \(Ceph S3\) is an artifact repository that stores boot artifacts.
+-   Configuration Framework Service \(CFS\) configures nodes using configuration framework. Launches and aggregates the status from one or more Ansible instances against nodes \(node personalization\) or images \(image customization\).
+
+![Boot Nodes](../../img/operations/bos_v2_reboot.gif)
+
+**Workflow Overview:** The following sequence of steps occur during this workflow.
+
+1.  **Administrator creates a configuration**
+
+    Add a configuration to CFS.
+
+    ```bash
+    cray cfs configurations update sample-config --file configuration.json
+    ```
+
+    Example output:
+
+    ```json
+    {
+        "lastUpdated": "2020-09-22T19:56:32Z",
+        "layers": [
+            {
+                "cloneUrl": "https://api-gw-service-nmn.local/vcs/cray/configmanagement.
+                git",
+                "commit": "01b8083dd89c394675f3a6955914f344b90581e2",
+                "playbook": "site.yaml"
+            }
+        ],
+        "name": "sample-config"
+    }
+    ```
+
+1.  **Administrator creates a session template**
+
+    A session template is a collection of metadata for a group of nodes and their desired configuration. A session template can be created from a JSON structure. It returns a SessionTemplate ID if successful.
+
+    See [Manage a Session Template](Manage_a_Session_Template.md) for more information.
+
+1.  **Administrator creates a session**
+
+    Create a session to perform the operation specified in the operation request parameter on the boot set defined in the session template. For this use case, Administrator creates a session with operation as Boot and specifies the session template ID.
+
+    ```bash
+    # cray bos v2 sessions create \
+    --template-name SESSIONTEMPLATE_NAME \
+    --operation Reboot
+    ```
+
+1.  **Session setup operator**
+
+    The creation of a session causes the session-setup operator to set a desired state on all relevant components.  This includes pulling files from S3 to determine boot artifacts like kernel, initrd, and root file system.  The session setup operator also enables the relevant components at this time.
+    
+1.  **Phase operator (powering-off)**
+
+    The phase operator will detect the enabled components and assign them a phase.  This involves checking the current state of the node, including communicating with HSM to determine the current power status of the node.
+    
+    In this example of booting nodes, the first phase is `powering-off`.  If queried at this point, the nodes will have a status of `power-off-pending`.
+    
+1.  **Graceful-power-off operator**
+
+    The power-off operator will detect nodes with a `power-off-pending` status, calls capmc to power-off the node.  Then, the power-off operator will update the state of the node in BOS, including setting the last action. If queried at this point, the nodes will have a status of `power-off-gracefully-called`.
+    
+1.  **Forceful-power-off operator**
+
+    If powering-off is taking too long, the forceful-power-off will take over.  It also calls capmc to power-off the node, but with the addition of the forceful flag.  Then, the power-off operator will update the state of the node in BOS, including setting the last action. If queried at this point, the nodes will have a status of `power-off-forcefully-called`.
+    
+1.  **Phase operator (powering-on)**
+
+    The phase operator will continue monitoring the states for each node until HSM reports that the power states are of.  When the power state for a node is off, the phase operator will either set the phase to `powering-on`.  If queried at this point, the nodes will have a status of `power-on-pending`.
+    
+1.  **Power-on operator**
+
+    The power-on operator will detect nodes with a `power-on-pending` status.  The power-on operator first sets the desired boot artifacts in BSS.  If configuration is enabled for the node, the power-on operator will also call CFS to set the desired configuration and disable the node.  The power-on operator then calls capmc to power-on the node.  Lastly, the power-on operator will update the state of the node in BOS, including setting the last action.  If queried at this point, the nodes will have a status of `power-on-called`.
+    
+1.  **CAPMC boots nodes**
+
+    CAPMC interfaces directly with the Redfish APIs and powers on the selected nodes.
+
+1. **BSS interacts with the nodes**
+
+    BSS generates iPXE boot scripts based on the image content and boot parameters that have been assigned to a node. Nodes download the iPXE boot script from BSS.
+
+1. **S3 interacts with the nodes**
+
+    Nodes download the boot artifacts. The nodes boot using the boot artifacts pulled from S3.
+    
+1.  **Phase operator (configuring)**
+
+    The phase operator will continue monitoring the states for each node until HSM reports that the power states are on.  When the power state for a node is on, the phase operator will either set the phase to `configuring` if CFS configuration is required or it will clear the current phase if the node is in it's final state.
+    
+1. **CFS applies configuration**
+
+    If needed, CFS runs Ansible on the nodes and applies post-boot configuration \(also called node personalization\).
+    
+1.  **Phase operator (complete)**
+
+    The phase operator will continue monitoring the states for each node until CFS reports that configuration is complete.  The phase operator will clear the current phase now that the node is in it's final state.  The phase operator will also disable components at this point.
+    
+1.  **Session completion operator**
+
+    When all nodes belonging to a session have been disabled, the session is marked complete, and it's final status is saved to the database.
+
+### V2 Power Off Nodes
+
+**Use Cases:** Administrator powers off selected compute nodes.
+
+**Components:** This workflow is based on the interaction of the Boot Orchestration Service \(BOS\) with other services during the node shutdown process:
+
+Mentioned in this workflow:
+
+-   Boot Orchestration Service \(BOS\) is responsible for booting, configuring, and shutting down collections of nodes. The Boot Orchestration Service has the following components:
+    -   Boot Orchestration Session Template is a collection of one or more boot set objects. A boot set defines a collection of nodes and the information about the boot artifacts and parameters.
+    -   BOS sessions provide a way to apply a template across a group of nodes and monitor the progress of those nodes as they move toward their desired state.
+    -   BOS Operators interact with other services to perform actions on nodes, moving them toward their desired state.
+-   Cray Advanced Platform and Monitoring Control \(CAPMC\) service provides system-level power control for nodes in the system. CAPMC interfaces directly with the Redfish APIs to the controller infrastructure to effect power and environmental changes on the system.
+-   Hardware State Manager \(HSM\) tracks the state of each node and their group and role associations.
+
+![Boot Nodes](../../img/operations/bos_v2_reboot.gif)
+
+**Workflow Overview:** The following sequence of steps occur during this workflow.
+
+1.  **Administrator creates a session template**
+
+    A session template is a collection of metadata for a group of nodes and their desired configuration. A session template can be created from a JSON structure. It returns a SessionTemplate ID if successful.
+
+    See [Manage a Session Template](Manage_a_Session_Template.md) for more information.
+
+1.  **Administrator creates a session**
+
+    Create a session to perform the operation specified in the operation request parameter on the boot set defined in the session template. For this use case, Administrator creates a session with operation as Boot and specifies the session template ID.
+
+    ```bash
+    # cray bos v2 sessions create \
+    --template-name SESSIONTEMPLATE_NAME \
+    --operation Reboot
+    ```
+
+1.  **Session setup operator**
+
+    The creation of a session causes the session-setup operator to set a desired state on all relevant components.  This includes pulling files from S3 to determine boot artifacts like kernel, initrd, and root file system.  The session setup operator also enables the relevant components at this time.
+    
+1.  **Phase operator (powering-off)**
+
+    The phase operator will detect the enabled components and assign them a phase.  This involves checking the current state of the node, including communicating with HSM to determine the current power status of the node.
+    
+    In this example of booting nodes, the first phase is `powering-off`.  If queried at this point, the nodes will have a status of `power-off-pending`.
+    
+1.  **Graceful-power-off operator**
+
+    The power-off operator will detect nodes with a `power-off-pending` status, calls capmc to power-off the node.  Then, the power-off operator will update the state of the node in BOS, including setting the last action. If queried at this point, the nodes will have a status of `power-off-gracefully-called`.
+    
+1.  **Forceful-power-off operator**
+
+    If powering-off is taking too long, the forceful-power-off will take over.  It also calls capmc to power-off the node, but with the addition of the forceful flag.  Then, the power-off operator will update the state of the node in BOS, including setting the last action. If queried at this point, the nodes will have a status of `power-off-forcefully-called`.
+    
+1.  **Phase operator (complete)**
+
+    The phase operator will continue monitoring the states for each node until CFS reports that configuration is complete.  The phase operator will clear the current phase now that the node is in it's final state.  The phase operator will also disable components at this point.
+    
+1.  **Session completion operator**
+
+    When all nodes belonging to a session have been disabled, the session is marked complete, and it's final status is saved to the database.
+  
+## BOS V1 Workflows
+
+The following workflows are included in this section:
+
+  - [Boot and Configure Nodes](#v1-boot-and-configure-nodes)
+  - [Reconfigure Nodes](#v1-reconfigure-nodes)
+  - [Power Off Nodes](#v1-power-off-nodes)
+
+### V1 Boot and Configure Nodes
 **Use Case:** Administrator powers on and configures select compute nodes.
 
 **Components:** This workflow is based on the interaction of the BOS with other services during the boot process:
@@ -26,7 +317,7 @@ Mentioned in this workflow:
 -   The Simple Storage Service \(Ceph S3\) is an artifact repository that stores boot artifacts.
 -   Configuration Framework Service \(CFS\) configures nodes using configuration framework. Launches and aggregates the status from one or more Ansible instances against nodes \(node personalization\) or images \(image customization\).
 
-![Boot and Configure Nodes](../../img/operations/bos_boot.gif)
+![Boot and Configure Nodes](../../img/operations/bos_v1_boot.gif)
 
 **Workflow Overview:** The following sequence of steps occur during this workflow.
 
@@ -71,7 +362,7 @@ Mentioned in this workflow:
     -   Shutdown – Gracefully power down nodes that are on
 
     ```bash
-    # cray bos session create \
+    # cray bos v1 session create \
     --template-uuid SESSIONTEMPLATE_NAME \
     --operation Boot
     ```
@@ -120,7 +411,7 @@ Mentioned in this workflow:
 
     CFS runs Ansible on the nodes and applies post-boot configuration \(also called node personalization\). CFS then communicates the results back to BOA.
 
-### Reconfigure Nodes
+### V1 Reconfigure Nodes
 
 **Use Case:** Administrator reconfigures compute nodes that are already booted and configured.
 
@@ -135,7 +426,7 @@ Mentioned in this workflow:
 -   Configuration Framework Service \(CFS\) configures nodes using configuration framework. Launches and aggregates the status from one or more Ansible instances against nodes \(node personalization\) or images \(image customization\).
 -   Hardware State Manager \(HSM\) tracks the state of each node and their group and role associations.
 
-![Reconfigure Nodes](../../img/operations/bos_reconfigure.gif)
+![Reconfigure Nodes](../../img/operations/bos_v1_reconfigure.gif)
 
 **Workflow Overview:** The following sequence of steps occur during this workflow.
 
@@ -155,7 +446,7 @@ Mentioned in this workflow:
     -   Shutdown – Gracefully power down nodes that are on
 
     ```bash
-    cray bos session create \
+    cray bos v1 session create \
         --template-uuid SESSIONTEMPLATE_NAME \
         --operation Configure
     ```
@@ -180,7 +471,7 @@ Mentioned in this workflow:
 
     CFS then communicates the results back to BOA.
 
-### Power Off Nodes
+### V1 Power Off Nodes
 
 **Use Cases:** Administrator powers off selected compute nodes.
 
@@ -195,7 +486,7 @@ Mentioned in this workflow:
 -   Cray Advanced Platform and Monitoring Control \(CAPMC\) service provides system-level power control for nodes in the system. CAPMC interfaces directly with the Redfish APIs to the controller infrastructure to effect power and environmental changes on the system.
 -   Hardware State Manager \(HSM\) tracks the state of each node and their group and role associations.
 
-![Shutdown Nodes](../../img/operations/bos_shutdown.gif)
+![Shutdown Nodes](../../img/operations/bos_v1_shutdown.gif)
 
 **Workflow Overview:** The following sequence of steps occur during this workflow.
 
@@ -215,7 +506,7 @@ Mentioned in this workflow:
     -   Shutdown – Gracefully power down nodes that are on
 
     ```bash
-    cray bos session create \
+    cray bos v1 session create \
         --template-uuid SESSIONTEMPLATE_NAME \
         --operation Shutdown
     ```
@@ -239,4 +530,3 @@ Mentioned in this workflow:
 7.  **CAPMC to BOA**
 
     CAPMC communicates the results back to BOA.
-

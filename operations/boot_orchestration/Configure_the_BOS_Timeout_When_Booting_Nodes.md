@@ -1,5 +1,7 @@
 # Configure the BOS Timeout When Booting Compute Nodes
 
+> **`NOTE`** This section is for BOS V1 only.  For similar functionality in BOS V2 see the BOS V2 [Options](Options.md).
+
 Manually update the boa-job-template ConfigMap to tune the timeout and sleep intervals for the Boot Orchestration Agent \(BOA\). Correcting the timeout value is a good troubleshooting option for when BOS sessions hang waiting for nodes to be in a Ready state.
 
 If the BOS timeout occurs when booting compute nodes, the system will be unable to boot via BOS.

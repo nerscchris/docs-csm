@@ -1,5 +1,7 @@
 # Check the Progress of BOS Session Operations
 
+> **`NOTE`** This section is for BOS V1 only.  For similar functionality in BOS V2 refer to [View the Status of a BOS Session](View_the_Status_of_a_BOS_Session.md)
+
 Describes how to view the logs of BOS operations with Kubernetes.
 
 When a Boot Orchestration Service \(BOS\) session is created, it will return a job ID. This ID can be used to locate the Boot Orchestration Agent \(BOA\) Kubernetes job that executes the session. For example:

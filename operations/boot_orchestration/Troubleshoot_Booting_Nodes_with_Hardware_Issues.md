@@ -1,5 +1,7 @@
 # Troubleshoot Booting Nodes with Hardware Issues
 
+> **`NOTE`** This section is for BOS V1 only.  Bad components will not impact the booting of other components in BOS V2.
+
 How to identify a node with hardware issues and how to disable is via the HSM.
 
 If a node included in a Boot Orchestration Service \(BOS\) session template is having hardware issues, it can prevent the node from powering back up correctly. The entire BOS session will fail with a timeout error waiting for the node to become ready.

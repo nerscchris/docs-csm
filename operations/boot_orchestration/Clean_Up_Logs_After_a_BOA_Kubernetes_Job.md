@@ -1,5 +1,7 @@
 # Clean Up Logs After a BOA Kubernetes Job
 
+> **`NOTE`** This section is for BOS V1 only.  BOS V2 does not use BOA jobs and does not require cleanup.
+
 Delete log entries from previous boot orchestration jobs. The Boot Orchestration Service \(BOS\) launches a Boot Orchestration Agent \(BOA\) Kubernetes job. BOA then launches a Configuration Framework Service \(CFS\) session, resulting in a CFS-BOA Kubernetes job. Thus, there are two separate sets of jobs that can be removed.
 
 Deleting log entries creates more space and helps improve the usability of viewing logs.
