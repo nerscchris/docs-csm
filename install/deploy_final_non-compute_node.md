@@ -138,7 +138,7 @@ The steps in this section load hand-off data before a later procedure reboots th
     The following commands create a `tar` archive of these files, storing it in a directory that will be backed up in the next step.
 
     ```bash
-    mkdir -pv "${PITDATA}"/prep/logs &&
+    PITBackupDateTime=$(date +%Y-%m-%d_%H-%M-%S); mkdir -pv "${PITDATA}"/prep/logs &&
          ls -d \
             /etc/dnsmasq.d \
             /etc/os-release \
@@ -154,43 +154,22 @@ The steps in this section load hand-off data before a later procedure reboots th
             /var/log/conman \
             /var/log/zypper.log 2>/dev/null |
          sed 's_^/__' |
-         xargs tar -C / -czvf "${PITDATA}/prep/logs/pit-backup-$(date +%Y-%m-%d_%H-%M-%S).tgz"
+         xargs tar -C / -czvf "${PITDATA}/prep/logs/pit-backup-${PITBackupDateTime}.tgz"
     ```
 
-1. (`pit#`) Backup the bootstrap information from `ncn-m001`.
+1. (`pit#`) Backup the bootstrap information from `ncn-m001` before rebooting it.
 
-    > **`NOTE`** This preserves information that should always be kept together in order to fresh-install the system again.
+    > **`NOTE`** This preserves information that should always be kept together. This data can be critical for debug and support as well as in order to fresh-install the system again.
 
-    1. Log in and set up passwordless SSH **to** the PIT node.
+    ```bash
+    tar -cvzf "${PITDATA}/PitPrepAndConfigsBackup-${PITBackupDateTime}.tgz" "${PITDATA}/prep" "${PITDATA}/configs" &&
+    cray artifacts create config-data \
+        "PitPrepAndConfigsBackup-${PITBackupDateTime}.tgz" \
+        "${PITDATA}/PitPrepAndConfigsBackup-${PITBackupDateTime}.tgz" &&
+    rm -v "${PITDATA}/PitPrepAndConfigsBackup-${PITBackupDateTime}.tgz" && echo COMPLETED
+    ```
 
-        Copying **only** the public keys from `ncn-m002` and `ncn-m003` to the PIT node. **Do not** set up
-        passwordless SSH **from** the PIT node or the key will have to be securely tracked or expunged if using a USB installation).
-
-        > The `ssh` commands below may prompt for the NCN root password.
-
-        ```bash
-        ssh ncn-m002 cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys &&
-             ssh ncn-m003 cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys &&
-             chmod 600 /root/.ssh/authorized_keys
-        ```
-
-    1. Back up files from the PIT to `ncn-m002`.
-
-        ```bash
-        ssh ncn-m002 \
-            "mkdir -pv /metal/bootstrap
-            rsync -e 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' -rltD -P --delete pit.nmn:'${PITDATA}'/prep /metal/bootstrap/
-            rsync -e 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' -rltD -P --delete pit.nmn:'${CSM_PATH}'/cray-pre-install-toolkit*.iso /metal/bootstrap/"
-        ```
-
-    1. Back up files from the PIT to `ncn-m003`.
-
-        ```bash
-        ssh ncn-m003 \
-            "mkdir -pv /metal/bootstrap
-            rsync -e 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' -rltD -P --delete pit.nmn:'${PITDATA}'/prep /metal/bootstrap/
-            rsync -e 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' -rltD -P --delete pit.nmn:'${CSM_PATH}'/cray-pre-install-toolkit*.iso /metal/bootstrap/"
-        ```
+    Ensure that the previous command chain output ends with `COMPLETED`, indicating that the procedure was successful.
 
 ### 3.3 Prepare for Rebooting
 
